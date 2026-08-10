@@ -2,7 +2,7 @@
 SHELL := /bin/bash
 PY := backend/.venv/bin/python
 
-.PHONY: help setup setup-backend setup-frontend seed reset dev-backend dev-frontend test test-backend test-frontend e2e screenshots lint build clean
+.PHONY: help setup setup-backend setup-frontend seed reset dev-backend dev-frontend test test-backend test-scenarios test-parallel test-frontend e2e screenshots lint build clean
 
 help: ## このヘルプを表示する
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
@@ -32,6 +32,12 @@ test: test-backend test-frontend ## 単体テストをすべて実行する
 
 test-backend: ## バックエンドのテスト (pytest)
 	cd backend && .venv/bin/python -m pytest
+
+test-scenarios: ## 業務シナリオテストのみ実行する
+	cd backend && .venv/bin/python -m pytest tests/scenarios -v
+
+test-parallel: ## シナリオを並列実行し、テスト間の独立性を確認する
+	cd backend && .venv/bin/python -m pytest tests/scenarios -n 4
 
 test-frontend: ## フロントエンドのユニットテスト (vitest)
 	cd frontend && npm test
