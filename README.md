@@ -4,7 +4,7 @@
 
 - **バックエンド**: Python 3.11 / FastAPI / SQLAlchemy 2.0 / SQLite
 - **フロントエンド**: Next.js 15 (App Router) / React 19 / TypeScript / Tailwind CSS v4
-- **テスト**: pytest（97件）・Vitest（44件）・Playwright E2E（24件）＝ **165件**
+- **テスト**: pytest（138件・うちシナリオ28件）・Vitest（44件）・Playwright E2E（24件）＝ **206件**
 
 ![ダッシュボード](frontend/screenshots/02-dashboard.png)
 
@@ -106,7 +106,10 @@ backend/
     api/routers/   # auth / users / templates / requests / notifications / analytics
     schemas/       # Pydantic の入出力スキーマ
     seed.py        # デモデータ
-  tests/           # pytest（ドメイン 38 / API 51 / セキュリティ 8）
+  tests/
+    scenarios/     # 業務シナリオ（法人単位でデータを分離）
+      world.py     # シナリオ記述用の DSL（Tenant / Actor）
+    test_*.py      # ドメイン・API・入力検証・セキュリティ
 frontend/
   app/(app)/       # 認証後の画面（ダッシュボード・申請・承認・管理）
   app/api/         # ログイン / ログアウト / BFF プロキシ
@@ -158,22 +161,50 @@ DRAFT ──submit──► PENDING ──approve(最終ステップ)──► A
 ## テスト
 
 ```bash
-make test          # pytest + vitest
-make test-backend  # 97 件
-make test-frontend # 44 件
-make e2e           # 24 件（バックエンド・フロントエンドを自動起動）
-make lint          # ruff + tsc --noEmit
+make test              # pytest + vitest
+make test-backend      # 138 件
+make test-scenarios    # 28 件（業務シナリオのみ）
+make test-parallel     # シナリオを4並列で実行（テスト間の独立性の確認）
+make test-frontend     # 44 件
+make e2e               # 24 件（バックエンド・フロントエンドを自動起動）
+make lint              # ruff + tsc --noEmit
 ```
 
 TDD で開発しています。振る舞いを先にテストで記述し、実装を通してから次の層へ進みました。
 
-- `backend/tests/test_workflow_engine.py` — 承認ステートマシンの仕様（38件）
-- `backend/tests/test_api.py` — HTTP 契約。フロントエンドが依存する仕様書も兼ねる（51件）
-- `backend/tests/test_security.py` — ハッシュ・トークン（8件）
-- `frontend/tests/` — 表示整形・入力検証・コンポーネント（44件）
-- `frontend/e2e/` — ログイン、申請、多段階承認、差戻し・再提出、却下、通知、権限、管理機能（24件）
+| 対象 | 件数 | 粒度 |
+|---|---|---|
+| `backend/tests/test_workflow_engine.py` | 38 | 承認ステートマシンの仕様 |
+| `backend/tests/test_api.py` | 51 | HTTP 契約。フロントエンドが依存する仕様書も兼ねる |
+| `backend/tests/test_form_validation.py` | 13 | 入力検証 |
+| `backend/tests/test_security.py` | 8 | ハッシュ・トークン |
+| `backend/tests/scenarios/` | 28 | **業務シナリオ**（下記） |
+| `frontend/tests/` | 44 | 表示整形・入力検証・コンポーネント |
+| `frontend/e2e/` | 24 | ブラウザ操作（ログイン〜承認〜管理機能） |
 
-E2E は専用データベース `backend/workflow-e2e.db` を毎回作り直してから実行します。
+### シナリオテスト
+
+`backend/tests/scenarios/` は、単機能ではなく**業務の流れ**を通しで検証します。「主任が精算を申請し、課長が差し戻し、修正して再提出し、経理が承認して完了する」といった一連を、実際の HTTP API 越しに複数の担当者が操作する形で記述しています。
+
+```python
+def test_経費精算が上長と経理の承認を経て完了する(tenant):
+    expense = tenant.expense_template()
+
+    request = tenant.employee.file_request(expense, "10月度 交通費精算", amount=18400, ...)
+    assert [item["id"] for item in tenant.manager.inbox()] == [request["id"]]
+
+    tenant.manager.approve(request, comment="内容を確認しました")
+    assert tenant.finance.approve(request)["status"] == "approved"
+```
+
+**テスト間の独立性は法人（テナント）単位で担保しています。**
+
+- `tenant` フィクスチャが、シナリオごとに**専用のテスト法人**を払い出します（組織・8名の社員・メールアドレスがすべてユニーク）
+- 申請フォームもシナリオ内で自前に定義するため、他のシナリオの改廃に影響されません
+- データベースはセッション全体で共有します。共有した状態でも干渉しないことを、テナント分離そのもので保証する設計です
+- そのため実行順序に依存せず、`make test-parallel` で並列実行しても結果が変わりません
+
+E2E（Playwright）は共有のデモデータに対してブラウザ操作を検証するもので、こちらは実行前にデータベースを作り直します（`backend/workflow-e2e.db`）。
 
 > **注**: 実行環境に Playwright のブラウザが同梱されている場合は `CHROMIUM_PATH=/path/to/chromium npm run e2e` のように指定できます。通常は `npx playwright install chromium` で取得してください。
 

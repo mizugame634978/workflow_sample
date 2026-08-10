@@ -25,15 +25,20 @@ def validate_form(fields: list[dict[str, Any]], data: dict[str, Any]) -> dict[st
                 errors[key] = f"{label}は必須項目です"
             continue
 
+        # 制約は「キーが無い」場合と「キーはあるが未設定 (None)」の両方があり得る。
+        # API 経由で作られたフォーム定義は後者になるため、値の有無で判定する。
+        minimum, maximum = field.get("min"), field.get("max")
+        max_length = field.get("max_length")
+
         field_type = _field_type(field.get("type"))
         if field_type is FieldType.NUMBER:
             number = _coerce_number(value)
             if number is None:
                 errors[key] = f"{label}は数値で入力してください"
-            elif "min" in field and number < field["min"]:
-                errors[key] = f"{label}は{field['min']}以上で入力してください"
-            elif "max" in field and number > field["max"]:
-                errors[key] = f"{label}は{field['max']}以下で入力してください"
+            elif minimum is not None and number < minimum:
+                errors[key] = f"{label}は{minimum:,g}以上で入力してください"
+            elif maximum is not None and number > maximum:
+                errors[key] = f"{label}は{maximum:,g}以下で入力してください"
         elif field_type is FieldType.DATE:
             if not _is_iso_date(value):
                 errors[key] = f"{label}はYYYY-MM-DD形式で入力してください"
@@ -44,8 +49,8 @@ def validate_form(fields: list[dict[str, Any]], data: dict[str, Any]) -> dict[st
         else:
             if not isinstance(value, str):
                 errors[key] = f"{label}は文字列で入力してください"
-            elif "max_length" in field and len(value) > field["max_length"]:
-                errors[key] = f"{label}は{field['max_length']}文字以内で入力してください"
+            elif max_length is not None and len(value) > max_length:
+                errors[key] = f"{label}は{max_length}文字以内で入力してください"
 
     return errors
 
